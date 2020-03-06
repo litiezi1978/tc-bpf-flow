@@ -7,12 +7,12 @@ LLC_FLAGS := -march=bpf -mcpu=probe -mattr=dwarfris
 CLANG ?= /home/litie/code/clang-9/bin/clang
 LLC ?= /home/litie/code/clang-9/bin/llc
 
-BPF = classifier3.o
+BPF = classifier4.o
 
-classifier3.ll : classifier3.c
+classifier4.ll : classifier4.c
 	${CLANG} ${MAX_LXC_OPTIONS} ${CLANG_FLAGS} -c $< -o $@
 
-classifier3.o: classifier3.ll
+classifier4.o: classifier4.ll
 	${LLC} ${LLC_FLAGS} -filetype=obj -o $@ $(patsubst %.o,%.ll,$@)
 
 all: $(BPF)
