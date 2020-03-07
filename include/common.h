@@ -59,8 +59,8 @@
 struct ipv4_ct_tuple {
     __be32	daddr;
     __be32	saddr;
-    __be16	dport;
     __be16	sport;
+    __be16	dport;
     __u8  nexthdr;
     __u8  flags;
 } __attribute__((packed));
