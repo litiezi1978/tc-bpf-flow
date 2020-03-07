@@ -36,6 +36,9 @@
 #define DROP_UNKNOWN_SENDER	-172
 #define DROP_NAT_NOT_NEEDED	-173
 
+#define CT_EGRESS 0
+#define CT_INGRESS 1
+
 #if __BYTE_ORDER == __LITTLE_ENDIAN
 # define __bpf_ntohs(x)		__builtin_bswap16(x)
 # define __bpf_htons(x)		__builtin_bswap16(x)
