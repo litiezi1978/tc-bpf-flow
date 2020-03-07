@@ -14,16 +14,12 @@
 
 static int (*bpf_trace_printk)(const char *fmt, int fmt_size, ...) = (void *)BPF_FUNC_trace_printk;
 
-#define trace_printk(fmt, ...)                                                 \
-  do {                                                                         \
-    char _fmt[] = fmt;                                                         \
-    bpf_trace_printk(_fmt, sizeof(_fmt), ##__VA_ARGS__);                       \
-  } while (0)
-
 __section("classifier")
 int classification(struct __sk_buff *skb) {
-	char msg1[] = "l2 header wrong!/n";
-	char msg2[] = "this is http!/n";
+	char msg1[] = "l2 header wrong!\n";
+	//char msg2[] = "HTTP GET srcIP=%d, dstIP=%d\n";
+	char msg3[] = "HTTP RESP srcIP=%d, dstIP=%d\n";
+	//char msg4[] = "TCP conn: %d %d %d\n";
 
 	void *data = (void*) (long) skb->data;
 	void *data_end = (void*) (long) skb->data_end;
@@ -82,8 +78,15 @@ int classification(struct __sk_buff *skb) {
 			return 0;
 		}
 
+//		bpf_trace_printk(msg4, sizeof(msg4), p[0], p[1], p[2]);
+
+//		if((p[0] == 'G') && (p[1] == 'E') && (p[2] == 'T')){
+//			bpf_trace_printk(msg2, sizeof(msg2), tuple.saddr, tuple.daddr);
+//			return 0;
+//		}
+
 		if ((p[0] == 'H') && (p[1] == 'T') && (p[2] == 'T') && (p[3] == 'P')) {
-		    bpf_trace_printk(msg2, sizeof(msg2));
+		    bpf_trace_printk(msg3, sizeof(msg3), tuple.saddr, tuple.daddr);
 			return 0;
 		}
 	}

@@ -1,18 +1,25 @@
-FLAGS := -D__NR_CPUS__=$(shell nproc) -O2 -g
-
+FLAGS := -D__KERNEL__ -D__NR_CPUS__=$(shell nproc) -O2 -g
 CLANG_FLAGS :=  ${FLAGS} -target bpf -emit-llvm
-CLANG_FLAGS += -Wall -Werror -Wno-address-of-packed-member -Wno-unknown-warning-option
+CLANG_FLAGS += -Wall -Werror \
+    -Wno-unused-value \
+    -Wno-pointer-sign \
+    -Wno-compare-distinct-pointer-types \
+    -Wno-gnu-variable-sized-type-not-at-end \
+    -Wno-address-of-packed-member \
+    -Wno-tautological-compare \
+    -Wno-unknown-warning-option 
+
 LLC_FLAGS := -march=bpf -mcpu=probe -mattr=dwarfris
 
 CLANG ?= /home/litie/code/clang-9/bin/clang
 LLC ?= /home/litie/code/clang-9/bin/llc
 
-BPF = classifier4.o
+BPF = classifier5.o
 
-classifier4.ll : classifier4.c
+classifier5.ll : classifier5.c
 	${CLANG} ${MAX_LXC_OPTIONS} ${CLANG_FLAGS} -c $< -o $@
 
-classifier4.o: classifier4.ll
+classifier5.o: classifier5.ll
 	${LLC} ${LLC_FLAGS} -filetype=obj -o $@ $(patsubst %.o,%.ll,$@)
 
 all: $(BPF)
