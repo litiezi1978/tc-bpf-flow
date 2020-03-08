@@ -14,12 +14,12 @@ LLC_FLAGS := -march=bpf -mcpu=probe -mattr=dwarfris
 CLANG ?= /home/litie/code/clang-9/bin/clang
 LLC ?= /home/litie/code/clang-9/bin/llc
 
-BPF = classifier6.o
+BPF = lxc_conntrac_01.o
 
-classifier6.ll : classifier6.c
+lxc_conntrac_01.ll : lxc_conntrac_01.c
 	${CLANG} ${MAX_LXC_OPTIONS} ${CLANG_FLAGS} -c $< -o $@
 
-classifier6.o: classifier6.ll
+lxc_conntrac_01.o: lxc_conntrac_01.ll
 	${LLC} ${LLC_FLAGS} -filetype=obj -o $@ $(patsubst %.o,%.ll,$@)
 
 all: $(BPF)

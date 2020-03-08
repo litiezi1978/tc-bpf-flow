@@ -39,6 +39,15 @@
 #define CT_EGRESS 0
 #define CT_INGRESS 1
 
+#define TUPLE_F_OUT	0	/* Outgoing flow */
+#define TUPLE_F_IN	1	/* Incoming flow */
+
+enum {
+    ACTION_UNSPEC,
+    ACTION_CREATE,
+    ACTION_CLOSE,
+};
+
 #if __BYTE_ORDER == __LITTLE_ENDIAN
 # define __bpf_ntohs(x)		__builtin_bswap16(x)
 # define __bpf_htons(x)		__builtin_bswap16(x)
@@ -58,6 +67,14 @@
 #define bpf_htonl(x) (__builtin_constant_p(x) ?	__constant_htonl(x) : __bpf_htonl(x))
 #define bpf_ntohl(x) (__builtin_constant_p(x) ?	__constant_ntohl(x) : __bpf_ntohl(x))
 
+union tcp_flags {
+    struct {
+        __u8 upper_bits;
+        __u8 lower_bits;
+        __u16 pad;
+    };
+    __u32 value;
+};
 
 struct ipv4_ct_tuple {
     __be32	daddr;
@@ -67,5 +84,26 @@ struct ipv4_ct_tuple {
     __u8  nexthdr;
     __u8  flags;
 } __attribute__((packed));
+
+struct ct_entry {
+    __u64 rx_packets;
+    __u64 rx_bytes;
+    __u64 tx_packets;
+    __u64 tx_bytes;
+    __u32 lifetime;
+    __u16 rx_closing:1,
+          tx_closing:1,
+          seen_non_syn:1,
+          reserved:9;
+
+    /* represents the OR of all TCP flags seen for the transmit/receive direction of this entry. */
+    __u8  tx_flags_seen;
+    __u8  rx_flags_seen;
+
+    /* timestamp of the last time a monitor notification was sent for the transmit/receive direction. */
+    __u32 last_tx_report;
+    __u32 last_rx_report;
+};
+
 
 #endif
