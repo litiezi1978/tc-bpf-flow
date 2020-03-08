@@ -10,10 +10,19 @@
 #include <linux/bpf.h>
 #include <stdio.h>
 #include <stdbool.h>
-
 #include "include/common.h"
 
+#define IP_MF			0x2000
+#define IP_OFFSET		0x1FFF
+
 static int (*bpf_trace_printk)(const char *fmt, int fmt_size, ...) = (void *)BPF_FUNC_trace_printk;
+
+unsigned long long load_byte(void *skb, unsigned long long off) asm("llvm.bpf.load.byte");
+unsigned long long load_half(void *skb, unsigned long long off) asm("llvm.bpf.load.half");
+
+static inline int ip_is_fragment(struct __sk_buff *skb, __u64 nhoff) {
+	return load_half(skb, nhoff + offsetof(struct iphdr, frag_off)) & (IP_MF | IP_OFFSET);
+}
 
 static inline int __inline__ handle_traffic(struct __sk_buff *skb, int dir){
 	void *data_end = (void*)(long) skb->data_end;
@@ -42,6 +51,10 @@ static inline int __inline__ handle_traffic(struct __sk_buff *skb, int dir){
 		return TC_ACT_OK;
 	}
 
+	if (ip_is_fragment(skb, l2_header_len)){
+		return TC_ACT_OK;
+	}
+
 	if (ip_header_struct->protocol != IPPROTO_TCP) {
 		return TC_ACT_OK;
 	}
@@ -53,7 +66,7 @@ static inline int __inline__ handle_traffic(struct __sk_buff *skb, int dir){
 
 	__u32 ip_total_length = ip_header_struct->tot_len;
 
-	struct tcphdr *tcp_header_struct = data + ETH_HLEN + ip_header_len;
+	struct tcphdr *tcp_header_struct = data + l2_header_len + ip_header_len;
 	if (tcp_header_struct + 1 > data_end) {
 		char msg5[] = "tcp header out of meeory!\n";
 		bpf_trace_printk(msg5, sizeof(msg5));
@@ -67,25 +80,23 @@ static inline int __inline__ handle_traffic(struct __sk_buff *skb, int dir){
 	tuple.daddr = ip_header_struct->daddr;
 	tuple.saddr = ip_header_struct->saddr;
 	tuple.nexthdr = ip_header_struct->protocol;
-	if (skb_load_bytes(skb, ETH_HLEN + ip_header_len, &tuple.sport, 4) < 0){
+	if (skb_load_bytes(skb, l2_header_len + ip_header_len, &tuple.sport, 4) < 0){
 		char msg6[] = "cannot load sport dport from tcp header!\n";
 		bpf_trace_printk(msg6, sizeof(msg6));
 
 	    return TC_ACT_OK;
 	}
 
-	__u32 payload_offset = ETH_HLEN + ip_header_len + tcp_header_len;
+	__u32 payload_offset = l2_header_len + ip_header_len + tcp_header_len;
 	__u32 payload_length = ip_total_length - ip_header_len - tcp_header_len;
 	if (payload_length >= 8) {
 		__u8 p[8];
-//	    int i = 0;
-//	    for (i = 0; i < 8; i++) {
-//	      p[i] = load_byte(skb, payload_offset + i);
-//	    }
-		int ret = skb_load_bytes(skb, payload_offset, p, 8);
-		if (ret != 0){
-			return 0;
-		}
+	    int i = 0;
+	    for (i = 0; i < 8; i++) {
+	    	p[i] = load_byte(skb, payload_offset + i);
+	    }
+	    char msg3[] ="tcp payload = %s\n";
+	    bpf_trace_printk(msg3, sizeof(msg3), p);
 
 		if ((p[0] == 'G') && (p[1] == 'E') && (p[2] == 'T')) {
 			char msg1[] = "HTTP GET request, srcIP=%d, dstIP=%d\n";
