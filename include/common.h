@@ -36,8 +36,40 @@
 #define DROP_UNKNOWN_SENDER	-172
 #define DROP_NAT_NOT_NEEDED	-173
 
+#define NSEC_PER_SEC	1000000000UL
+
+#ifndef TRACE_PAYLOAD_LEN
+#define TRACE_PAYLOAD_LEN 128ULL
+#endif
+
+#ifndef __READ_ONCE
+#define __READ_ONCE(x) (*(volatile typeof(x) *)&x)
+#endif
+
+#ifndef __WRITE_ONCE
+#define __WRITE_ONCE(x, v) (*(volatile typeof(x) *)&x) = (v)
+#endif
+
+/* {READ,WRITE}_ONCE() with verifier workaround via bpf_barrier(). */
+#ifndef READ_ONCE
+#define READ_ONCE(x) ({ typeof(x) __val; __val = __READ_ONCE(x); bpf_barrier(); __val; })
+#endif
+
+#ifndef WRITE_ONCE
+# define WRITE_ONCE(x, v) ({ typeof(x) __val = (v); __WRITE_ONCE(x, __val); bpf_barrier(); __val; })
+#endif
+
 #define CT_EGRESS 0
 #define CT_INGRESS 1
+
+#ifndef CT_REPORT_INTERVAL
+#define CT_REPORT_INTERVAL	5	/* 5 seconds */
+#endif
+
+#define CT_CONNECTION_LIFETIME_TCP	21600
+#define CT_CONNECTION_LIFETIME_NONTCP 60
+#define CT_SYN_TIMEOUT	60
+#define CT_CLOSE_TIMEOUT 10
 
 #define TUPLE_F_OUT	0	/* Outgoing flow */
 #define TUPLE_F_IN	1	/* Incoming flow */
@@ -46,6 +78,13 @@ enum {
     ACTION_UNSPEC,
     ACTION_CREATE,
     ACTION_CLOSE,
+};
+
+enum {
+    CT_NEW,
+    CT_ESTABLISHED,
+    CT_REPLY,
+    CT_RELATED,
 };
 
 #if __BYTE_ORDER == __LITTLE_ENDIAN

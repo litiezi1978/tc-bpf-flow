@@ -31,7 +31,76 @@ static inline int ip_is_fragment(struct __sk_buff *skb, __u64 nhoff) {
 	return load_half(skb, nhoff + offsetof(struct iphdr, frag_off)) & (IP_MF | IP_OFFSET);
 }
 
-static inline int __inline__ handle_traffic(struct __sk_buff *skb, int dir){
+static inline __u8 __inline__ ct_lookup(
+		struct __sk_buff *skb,
+		struct ipv4_ct_tuple *tuple,
+		int action,
+		int dir,
+		union tcp_flags seen_flags)
+{
+	struct ct_entry *entry;
+	if ((entry = map_lookup_elem(&CT_MAP_TCP4, tuple))) {
+		//TODO
+		return CT_ESTABLISHED;
+	}
+
+	return CT_NEW;
+}
+
+static inline int __inline__ ct_create4(
+		struct ipv4_ct_tuple *tuple,
+        struct __sk_buff *skb,
+        int dir)
+{
+    struct ct_entry entry = {};
+    union tcp_flags seen_flags = { .value = 0 };
+    seen_flags.value |= TCP_FLAG_SYN;
+
+    //ct_update_timeout(&entry, is_tcp, dir, seen_flags);
+
+    if (dir == CT_INGRESS) {
+        entry.rx_packets = 1;
+        entry.rx_bytes = skb->len;
+    } else if (dir == CT_EGRESS) {
+        entry.tx_packets = 1;
+        entry.tx_bytes = skb->len;
+    }
+
+    if (map_update_elem(&CT_MAP_TCP4, tuple, &entry, 0) < 0){
+        return DROP_CT_CREATE_FAILED;
+    }
+
+	char msg1[] = "create ct entry for tuple srcIp=%d, dstIp=%d\n";
+	bpf_trace_printk(msg1, sizeof(msg1), tuple->saddr, tuple->daddr);
+	char msg2[] = "srcPort=%d, dstPort=%d\n";
+	bpf_trace_printk(msg2, sizeof(msg2), bpf_htons(tuple->sport), bpf_htons(tuple->dport));
+
+    return TC_ACT_OK;
+}
+
+static inline void __inline__ ipv4_ct_tuple_reverse(struct ipv4_ct_tuple *tuple)
+{
+    __be32 tmp_addr = tuple->saddr;
+    __be16 tmp;
+
+    tuple->saddr = tuple->daddr;
+    tuple->daddr = tmp_addr;
+
+    tmp = tuple->sport;
+    tuple->sport = tuple->dport;
+    tuple->dport = tmp;
+
+    if (tuple->flags & TUPLE_F_IN) {
+        tuple->flags &= ~TUPLE_F_IN;
+    } else {
+        tuple->flags |= TUPLE_F_IN;
+    }
+}
+
+static inline int __inline__ handle_traffic(
+		struct __sk_buff *skb,
+		int dir)
+{
 	void *data_end = (void*)(long) skb->data_end;
 	void *data = (void*)(long) skb->data;
 
@@ -98,6 +167,16 @@ static inline int __inline__ handle_traffic(struct __sk_buff *skb, int dir){
     	action = ACTION_CLOSE;
     } else {
     	action = ACTION_CREATE;
+    }
+
+    __u8 ret = ct_lookup(skb, &tuple, action, dir, tcp_flags);
+    if(ret == CT_NEW){
+    	//反着再查一遍
+    	ipv4_ct_tuple_reverse(&tuple);
+    	ret = ct_lookup(skb, &tuple, action, dir, tcp_flags);
+    	if(ret == CT_NEW){
+    		ret = ct_create4(&tuple, skb, dir);
+    	}
     }
 
 	return TC_ACT_OK;
