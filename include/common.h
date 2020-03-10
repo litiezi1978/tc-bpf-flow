@@ -50,6 +50,14 @@
 #define __WRITE_ONCE(x, v) (*(volatile typeof(x) *)&x) = (v)
 #endif
 
+static inline void bpf_barrier(void)
+{
+    /* Workaround to avoid verifier complaint:
+     * "dereference of modified ctx ptr R5 off=48+0, ctx+const is allowed, ctx+const+const is not"
+     */
+    asm volatile("" ::: "memory");
+}
+
 /* {READ,WRITE}_ONCE() with verifier workaround via bpf_barrier(). */
 #ifndef READ_ONCE
 #define READ_ONCE(x) ({ typeof(x) __val; __val = __READ_ONCE(x); bpf_barrier(); __val; })
@@ -105,44 +113,5 @@ enum {
 #define bpf_ntohs(x) (__builtin_constant_p(x) ?	__constant_ntohs(x) : __bpf_ntohs(x))
 #define bpf_htonl(x) (__builtin_constant_p(x) ?	__constant_htonl(x) : __bpf_htonl(x))
 #define bpf_ntohl(x) (__builtin_constant_p(x) ?	__constant_ntohl(x) : __bpf_ntohl(x))
-
-union tcp_flags {
-    struct {
-        __u8 upper_bits;
-        __u8 lower_bits;
-        __u16 pad;
-    };
-    __u32 value;
-};
-
-struct ipv4_ct_tuple {
-    __be32	daddr;
-    __be32	saddr;
-    __be16	sport;
-    __be16	dport;
-    __u8  nexthdr;
-    __u8  flags;
-} __attribute__((packed));
-
-struct ct_entry {
-    __u64 rx_packets;
-    __u64 rx_bytes;
-    __u64 tx_packets;
-    __u64 tx_bytes;
-    __u32 lifetime;
-    __u16 rx_closing:1,
-          tx_closing:1,
-          seen_non_syn:1,
-          reserved:9;
-
-    /* represents the OR of all TCP flags seen for the transmit/receive direction of this entry. */
-    __u8  tx_flags_seen;
-    __u8  rx_flags_seen;
-
-    /* timestamp of the last time a monitor notification was sent for the transmit/receive direction. */
-    __u32 last_tx_report;
-    __u32 last_rx_report;
-};
-
 
 #endif

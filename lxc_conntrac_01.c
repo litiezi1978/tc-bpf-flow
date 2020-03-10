@@ -11,24 +11,54 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include "include/common.h"
+#include "lxc_conntrac.h"
 
-#define IP_MF			0x2000
-#define IP_OFFSET		0x1FFF
+static inline __u32 __inline__ ct_update_timeout(
+        struct ct_entry *entry,
+		__u32 input_lifetime,
+        int dir,
+        union tcp_flags flags)
+{
+	__u32 lifetime = input_lifetime;
+	if(input_lifetime <0){
+		__u32 lifetime = CT_CONNECTION_LIFETIME_NONTCP;
+		bool syn = flags.value & TCP_FLAG_SYN;
+		entry->seen_non_syn |= !syn;
+		if (entry->seen_non_syn) {
+			lifetime = CT_CONNECTION_LIFETIME_TCP;
+		} else {
+			lifetime = CT_SYN_TIMEOUT;
+		}
+	}
 
-struct bpf_elf_map __section_maps CT_MAP_TCP4 = {
-    .type		= BPF_MAP_TYPE_LRU_HASH,
-    .size_key	= sizeof(struct ipv4_ct_tuple),
-    .size_value	= sizeof(struct ct_entry),
-    .pinning	= PIN_GLOBAL_NS,
-    .max_elem	= 4096,
-};
+    __u32 now = bpf_ktime_get_sec();
+    __u8 accumulated_flags;
+    __u8 seen_flags = flags.lower_bits;
+    __u32 last_report;
 
-static int (*bpf_trace_printk)(const char *fmt, int fmt_size, ...) = (void *)BPF_FUNC_trace_printk;
+    entry->lifetime = now + lifetime;
 
-unsigned long long load_half(void *skb, unsigned long long off) asm("llvm.bpf.load.half");
+	if (dir == CT_INGRESS) {
+		accumulated_flags = READ_ONCE(entry->rx_flags_seen);
+		last_report = READ_ONCE(entry->last_rx_report);
+	} else {
+		accumulated_flags = READ_ONCE(entry->tx_flags_seen);
+		last_report = READ_ONCE(entry->last_tx_report);
+	}
+	seen_flags |= accumulated_flags;
 
-static inline int ip_is_fragment(struct __sk_buff *skb, __u64 nhoff) {
-	return load_half(skb, nhoff + offsetof(struct iphdr, frag_off)) & (IP_MF | IP_OFFSET);
+	if (last_report + CT_REPORT_INTERVAL < now || accumulated_flags != seen_flags) {
+		/* verifier workaround: we don't use reference here. */
+		if (dir == CT_INGRESS) {
+			WRITE_ONCE(entry->rx_flags_seen, seen_flags);
+			WRITE_ONCE(entry->last_rx_report, now);
+		} else {
+			WRITE_ONCE(entry->tx_flags_seen, seen_flags);
+			WRITE_ONCE(entry->last_tx_report, now);
+		}
+		return TRACE_PAYLOAD_LEN;
+	}
+	return 0;
 }
 
 static inline __u8 __inline__ ct_lookup(
@@ -39,11 +69,48 @@ static inline __u8 __inline__ ct_lookup(
 		union tcp_flags seen_flags)
 {
 	struct ct_entry *entry;
+    int reopen;
+    __u32 monitor = 0;
+
 	if ((entry = map_lookup_elem(&CT_MAP_TCP4, tuple))) {
-		//TODO
+        if (ct_entry_alive(entry)) {
+            monitor = ct_update_timeout(entry, -1,  dir, seen_flags);
+        }
+
+        if (dir == CT_INGRESS) {
+        	__sync_fetch_and_add(&entry->rx_packets, 1);
+            __sync_fetch_and_add(&entry->rx_bytes, skb->len);
+        } else if (dir == CT_EGRESS) {
+        	__sync_fetch_and_add(&entry->tx_packets, 1);
+            __sync_fetch_and_add(&entry->tx_bytes, skb->len);
+        }
+
+        switch(action){
+        case ACTION_CREATE:
+            reopen = entry->rx_closing | entry->tx_closing;
+            reopen |= seen_flags.value & TCP_FLAG_SYN;
+            if (unlikely(reopen == (TCP_FLAG_SYN|0x1))) {
+                ct_reset_closing(entry);
+                monitor = ct_update_timeout(entry, -1, dir, seen_flags);
+            }
+            break;
+        case ACTION_CLOSE:
+            if (dir == CT_INGRESS){
+                entry->rx_closing = 1;
+            } else {
+                entry->tx_closing = 1;
+            }
+            monitor = TRACE_PAYLOAD_LEN;
+            if (ct_entry_alive(entry)){
+                break;
+            }
+            ct_update_timeout(entry, CT_CLOSE_TIMEOUT, dir, seen_flags);
+            break;
+        }
 		return CT_ESTABLISHED;
 	}
 
+    monitor = TRACE_PAYLOAD_LEN;
 	return CT_NEW;
 }
 
@@ -56,7 +123,7 @@ static inline int __inline__ ct_create4(
     union tcp_flags seen_flags = { .value = 0 };
     seen_flags.value |= TCP_FLAG_SYN;
 
-    //ct_update_timeout(&entry, is_tcp, dir, seen_flags);
+    ct_update_timeout(&entry, -1, dir, seen_flags);
 
     if (dir == CT_INGRESS) {
         entry.rx_packets = 1;
@@ -69,11 +136,6 @@ static inline int __inline__ ct_create4(
     if (map_update_elem(&CT_MAP_TCP4, tuple, &entry, 0) < 0){
         return DROP_CT_CREATE_FAILED;
     }
-
-	char msg1[] = "create ct entry for tuple srcIp=%d, dstIp=%d\n";
-	bpf_trace_printk(msg1, sizeof(msg1), tuple->saddr, tuple->daddr);
-	char msg2[] = "srcPort=%d, dstPort=%d\n";
-	bpf_trace_printk(msg2, sizeof(msg2), bpf_htons(tuple->sport), bpf_htons(tuple->dport));
 
     return TC_ACT_OK;
 }
@@ -183,12 +245,14 @@ static inline int __inline__ handle_traffic(
 }
 
 __section("egress")
-int handle_egress(struct __sk_buff *skb) {
+int handle_egress(struct __sk_buff *skb)
+{
 	return handle_traffic(skb, CT_EGRESS);
 }
 
 __section("ingress")
-int handle_ingress(struct __sk_buff *skb) {
+int handle_ingress(struct __sk_buff *skb)
+{
 	return handle_traffic(skb, CT_INGRESS);
 }
 
