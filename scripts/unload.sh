@@ -3,3 +3,4 @@
 #sudo tc qdisc del dev $IFNAME ingress
 tc filter del dev ens33 egress
 tc filter del dev ens33 ingress
+tc qdisc del dev ens33 clsact

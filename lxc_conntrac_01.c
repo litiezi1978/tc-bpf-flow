@@ -137,6 +137,11 @@ static inline int __inline__ ct_create4(
         return DROP_CT_CREATE_FAILED;
     }
 
+	char msg1[] = "create conn track, srcIP=%d, dstIP=%d\n";
+	bpf_trace_printk(msg1, sizeof(msg1), tuple->saddr, tuple->daddr);
+	char msg2[] = "srcPort=%d, dstPort=%d\n";
+	bpf_trace_printk(msg2, sizeof(msg2), tuple->sport, tuple->dport);
+
     return TC_ACT_OK;
 }
 
